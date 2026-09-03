@@ -31,7 +31,7 @@ function setup(createOrder: ErpClient["createOrder"]) {
 }
 
 describe("OrderForwarder", () => {
-  it("stuurt alle regels, korting en verzendkosten door", async () => {
+  it("stuurt alle orderregels volgens het ERP-mockcontract door", async () => {
     const requests: ErpOrderRequest[] = [];
     const { forwarder } = setup(async (request, key) => {
       requests.push(request);
@@ -41,14 +41,10 @@ describe("OrderForwarder", () => {
 
     await expect(forwarder.forward(order)).resolves.toEqual({ duplicate: false, erpOrderId: 42 });
     expect(requests).toEqual([{
-      external_reference: order.reference,
       lines: [
         { sku: "ZK-JAS-001", quantity: 2 },
         { sku: "ZK-MUTS-001", quantity: 1 },
       ],
-      discount_cents: 1_000,
-      shipping_cents: 695,
-      currency: "EUR",
     }]);
   });
 
@@ -66,7 +62,7 @@ describe("OrderForwarder", () => {
     release();
     await expect(Promise.all([first, simultaneousDuplicate])).resolves.toEqual([
       { duplicate: false, erpOrderId: 51 },
-      { duplicate: true, erpOrderId: 51 },
+      { duplicate: true, erpOrderId: undefined },
     ]);
     await expect(forwarder.forward(order)).resolves.toEqual({ duplicate: true, erpOrderId: 51 });
     expect(createOrder).toHaveBeenCalledTimes(1);
@@ -100,9 +96,20 @@ describe("OrderForwarder", () => {
       reason: "ERP returned HTTP 500",
       order,
     });
-    expect(logger.error).toHaveBeenCalledWith(
-      "order definitief mislukt; dode-brievenbus-item aangemaakt",
-      expect.objectContaining({ orderReference: order.reference, attempts: 4 }),
+    expect(logger.error).toHaveBeenCalledWith("order definitief mislukt", expect.objectContaining({
+      orderReference: order.reference, attempts: 4, deadLetterStored: true,
+    }));
+  });
+
+  it("behoudt de oorspronkelijke fout en incidentlog als de dode brievenbus faalt", async () => {
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const forwarder = new OrderForwarder(
+      { createOrder: vi.fn().mockRejectedValue(new Error("ERP returned HTTP 500")) },
+      { add: vi.fn().mockRejectedValue(new Error("permission denied /secret/path")) },
+      logger,
+      async () => undefined,
     );
+    await expect(forwarder.forward(order)).rejects.toEqual(new OrderForwardingError(order.reference));
+    expect(logger.error).toHaveBeenCalledWith("order definitief mislukt", expect.objectContaining({ deadLetterStored: false }));
   });
 });

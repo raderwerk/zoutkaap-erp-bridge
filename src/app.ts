@@ -16,9 +16,13 @@ const startedAt = new Date();
  * uitgebreide statuspagina (Z05) landen hier in latere werkvloer-issues; dit
  * skelet biedt alleen de health- en statusendpoints zodat CI groen kan draaien.
  */
-export function createApp(forwarder?: OrderForwarder): Express {
+export function createApp(forwarder?: OrderForwarder, webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET ?? ""): Express {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req, _res, buffer) => {
+      (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }));
 
   app.use((req, _res, next) => {
     logger.info("inkomend verzoek", { method: req.method, path: req.path });
@@ -47,7 +51,7 @@ export function createApp(forwarder?: OrderForwarder): Express {
     undefined,
     new JsonlIdempotencyStore(process.env.IDEMPOTENCY_PATH ?? "data/order-idempotency.jsonl"),
   );
-  app.use(createOrderRouter(orderForwarder));
+  app.use(createOrderRouter(orderForwarder, webhookSecret, logger));
 
   return app;
 }

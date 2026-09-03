@@ -14,16 +14,12 @@ export interface ShopOrder {
 }
 
 export interface ErpOrderRequest {
-  external_reference: string;
   lines: Array<{ sku: string; quantity: number }>;
-  discount_cents: number;
-  shipping_cents: number;
-  currency: "EUR";
 }
 
 export interface ForwardResult {
   duplicate: boolean;
-  erpOrderId: number;
+  erpOrderId?: number;
 }
 
 export interface DeadLetterItem {

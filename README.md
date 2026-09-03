@@ -2,19 +2,27 @@
 
 ## Orderdoorgifte
 
-`POST /webhooks/orders` ontvangt een Shopify `orders/create`-payload en stuurt de
-order naar `POST /orders` van de ERP-mock. De Shopify-orderreferentie fungeert als
-idempotentiesleutel: dubbele en gelijktijdige leveringen maken binnen het draaiende
-proces maar één ERP-order; een append-only registratie bewaart dit bovendien over
-herstarts heen. Regels, totale korting en verzendkosten worden in
-eurocenten doorgegeven.
+`POST /webhooks/orders` ontvangt een Shopify `orders/create`-payload, verifieert
+`X-Shopify-Hmac-Sha256` over de ongewijzigde requestbody met
+`SHOPIFY_WEBHOOK_SECRET` en stuurt de order naar de ERP-mock. Een geldige webhook
+krijgt direct `202 Accepted`; verwerking en retries gebeuren op de achtergrond.
+De service stuurt de order naar `POST /orders` van de ERP-mock. De
+Shopify-orderreferentie fungeert als
+idempotentiesleutel. Een procesoverschrijdende lock en append-only registratie
+voorkomen dubbele ERP-orders en leggen `processing`, `completed` of `failed` vast.
+
+De huidige OpenAPI-versie van `zoutkaap-erp-mock` accepteert uitsluitend `lines`
+(SKU en aantal). Kortingen, verzendkosten, valuta en externe referentie worden
+daarom bewust niet als ondersteunde ERP-velden beschreven of verstuurd; het
+ERP-mockcontract moet worden uitgebreid voordat acceptatiecriterium 1 voor deze
+financiële velden end-to-end bewezen kan worden.
 
 Stel `ERP_BASE_URL` en `ERP_API_KEY` in voor de lokale ERP-mock. Mislukte ERP-calls
 worden maximaal vier keer geprobeerd volgens de ladder van 1, 5, 25 en 125 seconden.
-Daarna antwoordt de webhook met een leesbare `502`, wordt incidentinformatie
-gestructureerd gelogd en komt de volledige order als JSON-regel terecht in
-`data/order-dead-letters.jsonl` (instelbaar met `DEAD_LETTER_PATH`). De succesvolle
-idempotentiesleutels staan in `data/order-idempotency.jsonl` (instelbaar met
+Een ERP-call heeft een deadline van vier seconden. Na definitief falen wordt
+incidentinformatie gestructureerd gelogd en komt de volledige order als JSON-regel terecht in
+`data/order-dead-letters.jsonl` (instelbaar met `DEAD_LETTER_PATH`). De verwerkingsstatussen
+staan in `data/order-idempotency.jsonl` (instelbaar met
 `IDEMPOTENCY_PATH`).
 
 Middleware tussen de Zoutkaap-webshop (Shopify) en het ERP: voorraadsync elk kwartier, orderdoorgifte met retry en idempotentie, een statuspagina en logging.
