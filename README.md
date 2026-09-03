@@ -1,5 +1,34 @@
 # zoutkaap-erp-bridge
 
+## Orderdoorgifte
+
+`POST /webhooks/orders` ontvangt een Shopify `orders/create`-payload, verifieert
+`X-Shopify-Hmac-Sha256` over de ongewijzigde requestbody met
+`SHOPIFY_WEBHOOK_SECRET` en stuurt de order naar de ERP-mock. Een geldige webhook
+krijgt direct `202 Accepted`; verwerking en retries gebeuren op de achtergrond.
+De service stuurt de order naar `POST /orders` van de ERP-mock. De
+Shopify-orderreferentie fungeert als
+idempotentiesleutel. Een procesoverschrijdende lock en append-only registratie
+voorkomen dubbele ERP-orders en leggen `processing`, `completed` of `failed` vast.
+Bij het starten veegt de bridge achtergebleven `processing`-records langs en hervat
+hij de retryladder zodra het vorige proceseigenaarschap is vervallen. Bij `SIGTERM`
+worden actieve ladders afgebroken en met orderinhoud naar de dode brievenbus
+geschreven, zodat een deploy geen stil orderverlies veroorzaakt.
+
+De huidige OpenAPI-versie van `zoutkaap-erp-mock` accepteert uitsluitend `lines`
+(SKU en aantal). Kortingen, verzendkosten, valuta en externe referentie worden
+daarom bewust niet als ondersteunde ERP-velden beschreven of verstuurd; het
+ERP-mockcontract moet worden uitgebreid voordat acceptatiecriterium 1 voor deze
+financiële velden end-to-end bewezen kan worden.
+
+Stel `ERP_BASE_URL` en `ERP_API_KEY` in voor de lokale ERP-mock. Mislukte ERP-calls
+worden maximaal vier keer geprobeerd volgens de ladder van 1, 5, 25 en 125 seconden.
+Een ERP-call heeft een deadline van vier seconden. Na definitief falen wordt
+incidentinformatie gestructureerd gelogd en komt de volledige order als JSON-regel terecht in
+`data/order-dead-letters.jsonl` (instelbaar met `DEAD_LETTER_PATH`). De verwerkingsstatussen
+staan in `data/order-idempotency.jsonl` (instelbaar met
+`IDEMPOTENCY_PATH`).
+
 Middleware tussen de Zoutkaap-webshop (Shopify) en het ERP: voorraadsync elk kwartier, orderdoorgifte met retry en idempotentie, een statuspagina en logging.
 
 ## Klant
@@ -10,7 +39,7 @@ Deze repository is een backend-service zonder publiek bereikbare pagina's. De vo
 
 ## Stack en waarom
 
-Node.js 22 met TypeScript en Express. Een middleware die af en toe wordt aangeroepen door een cronjob en af en toe door een Shopify-webhook heeft geen framework nodig dat meer doet dan HTTP-routing en JSON. Vitest voor tests (snel, geen aparte configstap voor TypeScript), ESLint met `typescript-eslint` voor statische controle. Geen database in dit skelet; de eerste werkvloer-issues (voorraadsync, orderdoorgifte) bepalen of en welke opslag nodig is voor idempotentiesleutels.
+Node.js 22 met TypeScript en Express. Een middleware die af en toe wordt aangeroepen door een cronjob en af en toe door een Shopify-webhook heeft geen framework nodig dat meer doet dan HTTP-routing en JSON. Vitest voor tests (snel, geen aparte configstap voor TypeScript), ESLint met `typescript-eslint` voor statische controle. De orderdoorgifte gebruikt lokale append-only JSONL-bestanden voor idempotentiesleutels en de dode brievenbus.
 
 ## Lokaal draaien
 
@@ -40,7 +69,7 @@ npm run dev -- --dry-run
 ```
 
 - `GET /health` — liveness-check, geeft `{ "status": "ok" }`.
-- `GET /status` — statuspagina met servicenaam, opstarttijd en (nog te implementeren) sync- en orderstatus.
+- `GET /status` — statuspagina met servicenaam, opstarttijd en de ingeschakelde sync- en orderdoorgifte.
 
 ## Scripts
 
