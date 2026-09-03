@@ -1,5 +1,10 @@
 import express, { type Express } from "express";
 import { logger } from "./logger";
+import { JsonlDeadLetterQueue } from "./orders/dead-letter";
+import { HttpErpClient } from "./orders/erp-client";
+import { JsonlIdempotencyStore } from "./orders/idempotency";
+import { OrderForwarder } from "./orders/order-forwarder";
+import { createOrderRouter } from "./orders/order-router";
 
 const startedAt = new Date();
 
@@ -11,7 +16,7 @@ const startedAt = new Date();
  * uitgebreide statuspagina (Z05) landen hier in latere werkvloer-issues; dit
  * skelet biedt alleen de health- en statusendpoints zodat CI groen kan draaien.
  */
-export function createApp(): Express {
+export function createApp(forwarder?: OrderForwarder): Express {
   const app = express();
   app.use(express.json());
 
@@ -34,6 +39,15 @@ export function createApp(): Express {
       orders: { lastForwarded: null, note: "nog niet geïmplementeerd (Z04)" },
     });
   });
+
+  const orderForwarder = forwarder ?? new OrderForwarder(
+    new HttpErpClient(process.env.ERP_BASE_URL ?? "http://localhost:8000", process.env.ERP_API_KEY ?? "zoutkaap-local-demo-key"),
+    new JsonlDeadLetterQueue(process.env.DEAD_LETTER_PATH ?? "data/order-dead-letters.jsonl"),
+    logger,
+    undefined,
+    new JsonlIdempotencyStore(process.env.IDEMPOTENCY_PATH ?? "data/order-idempotency.jsonl"),
+  );
+  app.use(createOrderRouter(orderForwarder));
 
   return app;
 }

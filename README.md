@@ -1,5 +1,22 @@
 # zoutkaap-erp-bridge
 
+## Orderdoorgifte
+
+`POST /webhooks/orders` ontvangt een Shopify `orders/create`-payload en stuurt de
+order naar `POST /orders` van de ERP-mock. De Shopify-orderreferentie fungeert als
+idempotentiesleutel: dubbele en gelijktijdige leveringen maken binnen het draaiende
+proces maar één ERP-order; een append-only registratie bewaart dit bovendien over
+herstarts heen. Regels, totale korting en verzendkosten worden in
+eurocenten doorgegeven.
+
+Stel `ERP_BASE_URL` en `ERP_API_KEY` in voor de lokale ERP-mock. Mislukte ERP-calls
+worden maximaal vier keer geprobeerd volgens de ladder van 1, 5, 25 en 125 seconden.
+Daarna antwoordt de webhook met een leesbare `502`, wordt incidentinformatie
+gestructureerd gelogd en komt de volledige order als JSON-regel terecht in
+`data/order-dead-letters.jsonl` (instelbaar met `DEAD_LETTER_PATH`). De succesvolle
+idempotentiesleutels staan in `data/order-idempotency.jsonl` (instelbaar met
+`IDEMPOTENCY_PATH`).
+
 Middleware tussen de Zoutkaap-webshop (Shopify) en het ERP: voorraadsync elk kwartier, orderdoorgifte met retry en idempotentie, een statuspagina en logging.
 
 ## Klant
@@ -10,7 +27,7 @@ Deze repository is een backend-service zonder publiek bereikbare pagina's. De vo
 
 ## Stack en waarom
 
-Node.js 22 met TypeScript en Express. Een middleware die af en toe wordt aangeroepen door een cronjob en af en toe door een Shopify-webhook heeft geen framework nodig dat meer doet dan HTTP-routing en JSON. Vitest voor tests (snel, geen aparte configstap voor TypeScript), ESLint met `typescript-eslint` voor statische controle. Geen database in dit skelet; de eerste werkvloer-issues (voorraadsync, orderdoorgifte) bepalen of en welke opslag nodig is voor idempotentiesleutels.
+Node.js 22 met TypeScript en Express. Een middleware die af en toe wordt aangeroepen door een cronjob en af en toe door een Shopify-webhook heeft geen framework nodig dat meer doet dan HTTP-routing en JSON. Vitest voor tests (snel, geen aparte configstap voor TypeScript), ESLint met `typescript-eslint` voor statische controle. De orderdoorgifte gebruikt lokale append-only JSONL-bestanden voor idempotentiesleutels en de dode brievenbus.
 
 ## Lokaal draaien
 
