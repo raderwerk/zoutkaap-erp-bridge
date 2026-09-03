@@ -53,7 +53,10 @@ export class MemoryIdempotencyStore implements IdempotencyStore {
  * both restarts and multiple bridge processes sharing the same data directory.
  */
 export class JsonlIdempotencyStore implements IdempotencyStore {
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly removeLock: (path: string) => Promise<void> = unlink,
+  ) {}
 
   async claim(orderReference: string, order?: ShopOrder): Promise<ClaimResult> {
     await mkdir(dirname(this.path), { recursive: true });
@@ -111,7 +114,7 @@ export class JsonlIdempotencyStore implements IdempotencyStore {
       .map((record) => record.order);
   }
 
-  private async acquireLock(lockPath: string): Promise<FileHandle | undefined> {
+  private async acquireLock(lockPath: string, mayRecover = true): Promise<FileHandle | undefined> {
     try {
       const handle = await open(lockPath, "wx");
       await handle.writeFile(String(process.pid), "utf8");
@@ -122,17 +125,27 @@ export class JsonlIdempotencyStore implements IdempotencyStore {
         const contents = await readFile(lockPath, "utf8");
         const owner = Number(contents);
         if (!contents.trim() || !Number.isInteger(owner) || owner <= 0) {
-          await unlink(lockPath).catch(() => undefined);
-          return this.acquireLock(lockPath);
+          return this.recoverLock(lockPath, mayRecover);
         }
         process.kill(owner, 0);
         return undefined;
       } catch (ownerError) {
         if ((ownerError as NodeJS.ErrnoException).code === "EPERM") return undefined;
-        await unlink(lockPath).catch(() => undefined);
-        return this.acquireLock(lockPath);
+        return this.recoverLock(lockPath, mayRecover);
       }
     }
+  }
+
+  private async recoverLock(lockPath: string, mayRecover: boolean): Promise<FileHandle | undefined> {
+    if (!mayRecover) return undefined;
+    try {
+      await this.removeLock(lockPath);
+    } catch {
+      // A lock that cannot be removed must be treated as owned. Retrying the
+      // unchanged filesystem state would otherwise create an unbounded loop.
+      return undefined;
+    }
+    return this.acquireLock(lockPath, false);
   }
 
   private async latest(orderReference: string): Promise<RecordLine | undefined> {

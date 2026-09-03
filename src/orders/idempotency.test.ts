@@ -73,4 +73,22 @@ describe("JsonlIdempotencyStore", () => {
     expect(claim.state).toBe("claimed");
     await claim.lease!.complete(84);
   });
+
+  it("does not retry indefinitely when an orphaned lock is in a non-writable directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zoutkaap-idempotency-"));
+    directories.push(directory);
+    const path = join(directory, "orders.jsonl");
+    const lockPath = `${path}.${createHash("sha256").update("read-only-lock").digest("hex")}.lock`;
+    await writeFile(lockPath, "");
+    let removalAttempts = 0;
+    const readOnlyUnlink = async () => {
+      removalAttempts += 1;
+      throw Object.assign(new Error("read-only file system"), { code: "EROFS" });
+    };
+
+    const claim = await new JsonlIdempotencyStore(path, readOnlyUnlink).claim("read-only-lock");
+
+    expect(claim).toEqual({ state: "processing" });
+    expect(removalAttempts).toBe(1);
+  });
 });
