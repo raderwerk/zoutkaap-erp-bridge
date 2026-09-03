@@ -35,7 +35,7 @@ describe("GET /health", () => {
 });
 
 describe("GET /status", () => {
-  it("geeft de servicenaam en placeholders voor sync en orders", async () => {
+  it("geeft de servicenaam en actieve sync en orderdoorgifte", async () => {
     const baseUrl = await startServer();
     const res = await fetch(`${baseUrl}/status`);
     expect(res.status).toBe(200);
@@ -43,7 +43,7 @@ describe("GET /status", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.service).toBe("zoutkaap-erp-bridge");
     expect(body.status).toBe("ok");
-    expect(body.sync).toEqual({ lastRun: null, note: "nog niet geïmplementeerd (Z03)" });
-    expect(body.orders).toEqual({ lastForwarded: null, note: "nog niet geïmplementeerd (Z04)" });
+    expect(body.sync).toEqual({ enabled: true, intervalMinutes: 15 });
+    expect(body.orders).toEqual({ enabled: true, webhook: "/webhooks/orders", retryAttempts: 4 });
   });
 });
