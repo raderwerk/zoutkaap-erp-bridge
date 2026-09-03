@@ -11,6 +11,8 @@ export interface ErpClientOptions {
   maxRateLimitRetries?: number;
 }
 
+const MAX_RETRY_AFTER_MS = 60_000;
+
 export class ErpClient implements InventorySource {
   private readonly fetch: typeof fetch;
   private readonly sleep: (milliseconds: number) => Promise<void>;
@@ -32,7 +34,14 @@ export class ErpClient implements InventorySource {
       }
       if (attempt >= retries) throw new Error(`ERP bleef HTTP 429 geven na ${retries} retries`);
 
-      const waitMs = parseRetryAfter(response.headers.get("retry-after"));
+      const retryAfter = response.headers.get("retry-after");
+      const { waitMs, wasCapped } = parseRetryAfter(retryAfter);
+      if (wasCapped) {
+        this.logger.warn("ERP Retry-After begrensd", {
+          retryAfter,
+          maximumWaitMs: MAX_RETRY_AFTER_MS,
+        });
+      }
       this.logger.warn("ERP rate limit; wachten voor nieuwe poging", { waitMs, attempt: attempt + 1 });
       await this.sleep(waitMs);
     }
@@ -56,12 +65,19 @@ export class ErpClient implements InventorySource {
   }
 }
 
-function parseRetryAfter(value: string | null): number {
-  if (value === null) return 1_000;
+function parseRetryAfter(value: string | null): { waitMs: number; wasCapped: boolean } {
+  let requestedWaitMs = 1_000;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
-  const date = Date.parse(value);
-  return Number.isNaN(date) ? 1_000 : Math.max(0, date - Date.now());
+  if (value !== null && Number.isFinite(seconds) && seconds >= 0) {
+    requestedWaitMs = seconds * 1_000;
+  } else if (value !== null) {
+    const date = Date.parse(value);
+    requestedWaitMs = Number.isNaN(date) ? 1_000 : Math.max(0, date - Date.now());
+  }
+  return {
+    waitMs: Math.min(requestedWaitMs, MAX_RETRY_AFTER_MS),
+    wasCapped: requestedWaitMs > MAX_RETRY_AFTER_MS,
+  };
 }
 
 function parseInventory(value: unknown): InventoryItem[] {

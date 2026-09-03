@@ -39,7 +39,7 @@ export class ShopifyClient implements InventoryTarget {
   }
 
   async setInventory(item: InventoryItem): Promise<void> {
-    const inventoryItemId = this.inventoryItemIds.get(item.sku);
+    const inventoryItemId = this.inventoryItemIds.get(item.sku) ?? await this.getInventoryItemId(item.sku);
     if (inventoryItemId === undefined) throw new Error(`Shopify inventory-item ontbreekt voor ${item.sku}`);
     const data = await this.graphql<{
       inventorySetQuantities: { userErrors: Array<{ field: string[]; message: string }> };
@@ -53,6 +53,18 @@ export class ShopifyClient implements InventoryTarget {
     } });
     const errors = data.inventorySetQuantities.userErrors;
     if (errors.length > 0) throw new Error(`Shopify weigerde voorraad voor ${item.sku}: ${errors.map((e) => e.message).join(", ")}`);
+  }
+
+  private async getInventoryItemId(sku: string): Promise<string | undefined> {
+    const data = await this.graphql<{ productVariants: { nodes: Array<{ sku: string; inventoryItem: { id: string } }> } }>(
+      `query InventoryItemBySku($query: String!) {
+        productVariants(first: 10, query: $query) { nodes { sku inventoryItem { id } } }
+      }`,
+      { query: `sku:${JSON.stringify(sku)}` },
+    );
+    const inventoryItemId = data.productVariants.nodes.find((node) => node.sku === sku)?.inventoryItem.id;
+    if (inventoryItemId !== undefined) this.inventoryItemIds.set(sku, inventoryItemId);
+    return inventoryItemId;
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {

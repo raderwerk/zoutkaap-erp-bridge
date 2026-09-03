@@ -98,4 +98,20 @@ describe("syncInventory", () => {
     expect(sleep).toHaveBeenCalledWith(2_000);
     expect(request).toHaveBeenCalledTimes(2);
   });
+
+  it("begrenst een te hoge Retry-After en logt de begrenzing", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "3600" } }))
+      .mockResolvedValueOnce(Response.json([{ sku: "SKU", quantity: 7 }]));
+    const sleep = vi.fn(async () => undefined);
+    const log = silentLogger();
+    const client = new ErpClient({ baseUrl: "http://erp.test", apiKey: "test", fetch: request, sleep, logger: log });
+
+    await client.getInventory();
+
+    expect(sleep).toHaveBeenCalledWith(60_000);
+    expect(log.warn).toHaveBeenCalledWith("ERP Retry-After begrensd", {
+      retryAfter: "3600", maximumWaitMs: 60_000,
+    });
+  });
 });
