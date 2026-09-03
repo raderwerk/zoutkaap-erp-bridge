@@ -21,7 +21,23 @@ npm install
 npm run dev
 ```
 
-De service luistert standaard op poort 3000 (te overschrijven met de omgevingsvariabele `PORT`).
+De service luistert standaard op poort 3000 (te overschrijven met de omgevingsvariabele `PORT`) en synchroniseert bij het starten en daarna elke 15 minuten.
+
+Kopieer voor lokaal gebruik de voorbeeldconfiguratie en vul uitsluitend gegevens van een development store in:
+
+```bash
+cp .env.example .env
+set -a; source .env; set +a
+npm run dev
+```
+
+De bron is `GET /inventory` van `zoutkaap-erp-mock`, met `X-API-Key` volgens diens OpenAPI-contract. De bestemming gebruikt Shopify Admin GraphQL. Een run leest eerst de complete ERP-snapshot; bij een timeout of foutresponse wordt niets naar Shopify geschreven. HTTP 429 respecteert `Retry-After`. Alleen verschillen worden geschreven en per SKU gelogd met de oude en nieuwe stand.
+
+Een eenmalige droogloop toont dezelfde verschillen zonder te schrijven of de webserver te starten:
+
+```bash
+npm run dev -- --dry-run
+```
 
 - `GET /health` — liveness-check, geeft `{ "status": "ok" }`.
 - `GET /status` — statuspagina met servicenaam, opstarttijd en (nog te implementeren) sync- en orderstatus.
@@ -30,7 +46,7 @@ De service luistert standaard op poort 3000 (te overschrijven met de omgevingsva
 
 | Commando | Wat het doet |
 |---|---|
-| `npm run dev` | Start de service met hot reload |
+| `npm run dev` | Start de service met hot reload en de kwartiersync |
 | `npm run build` | Compileert TypeScript naar `dist/` |
 | `npm start` | Start de gecompileerde service uit `dist/` |
 | `npm run typecheck` | Controleert types zonder te compileren |
