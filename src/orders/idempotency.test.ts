@@ -60,4 +60,17 @@ describe("JsonlIdempotencyStore", () => {
     await expect(store.recoverableOrders()).resolves.toEqual([order]);
     await expect(store.claim(order.reference, order)).resolves.toMatchObject({ state: "claimed" });
   });
+
+  it.each(["", "not-a-pid", "0", "-1"])("reclaims an orphaned lock containing %j", async (contents) => {
+    const directory = await mkdtemp(join(tmpdir(), "zoutkaap-idempotency-"));
+    directories.push(directory);
+    const path = join(directory, "orders.jsonl");
+    const lockPath = `${path}.${createHash("sha256").update("orphaned-lock").digest("hex")}.lock`;
+    await writeFile(lockPath, contents);
+
+    const claim = await new JsonlIdempotencyStore(path).claim("orphaned-lock");
+
+    expect(claim.state).toBe("claimed");
+    await claim.lease!.complete(84);
+  });
 });

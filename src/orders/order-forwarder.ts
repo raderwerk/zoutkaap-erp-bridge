@@ -54,7 +54,7 @@ export class OrderForwarder {
     return recovered;
   }
 
-  /** Stops retry waits and durably fails every ladder owned by this process. */
+  /** Stops retry waits while leaving claims recoverable by the next process. */
   async shutdown(): Promise<void> {
     const active = [...this.active.values()];
     for (const item of active) item.cancel();
@@ -75,6 +75,7 @@ export class OrderForwarder {
       lines: order.lines.map(({ sku, quantity }) => ({ sku, quantity })),
     };
     let reason = "unknown ERP error";
+    let attempts = 0;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const stopped = cancelled ? await Promise.race([
@@ -82,9 +83,14 @@ export class OrderForwarder {
         cancelled.then(() => true),
       ]) : false;
       if (stopped) {
-        reason = "bridge stopped during order processing";
-        break;
+        await lease.abandon();
+        this.logger.info("orderverwerking onderbroken; order blijft herstelbaar", {
+          orderReference: order.reference,
+          attempts,
+        });
+        throw new Error(`Order ${order.reference} processing interrupted by bridge shutdown`);
       }
+      attempts = attempt;
       try {
         const created = await this.erp.createOrder(payload, order.reference);
         await lease.complete(created.id);
@@ -99,7 +105,7 @@ export class OrderForwarder {
     const failure = new OrderForwardingError(order.reference);
     let deadLetterStored = false;
     try {
-      await this.deadLetters.add({ failedAt: new Date().toISOString(), orderReference: order.reference, attempts: MAX_ATTEMPTS, reason, order });
+      await this.deadLetters.add({ failedAt: new Date().toISOString(), orderReference: order.reference, attempts, reason, order });
       deadLetterStored = true;
     } catch (deadLetterError) {
       this.logger.error("dode brievenbus kon niet worden geschreven", {
@@ -114,7 +120,7 @@ export class OrderForwarder {
       });
     });
     this.logger.error("order definitief mislukt", {
-      orderReference: order.reference, attempts: MAX_ATTEMPTS, reason, deadLetterStored,
+      orderReference: order.reference, attempts, reason, deadLetterStored,
     });
     throw failure;
   }

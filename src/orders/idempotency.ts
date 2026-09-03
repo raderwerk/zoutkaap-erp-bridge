@@ -7,6 +7,7 @@ import type { ShopOrder } from "./types";
 export interface IdempotencyLease {
   complete(erpOrderId: number): Promise<void>;
   fail(reason: string): Promise<void>;
+  abandon(): Promise<void>;
 }
 
 export interface ClaimResult {
@@ -41,6 +42,7 @@ export class MemoryIdempotencyStore implements IdempotencyStore {
       lease: {
         complete: async (erpOrderId) => void this.records.set(orderReference, { orderReference, state: "completed", erpOrderId }),
         fail: async (reason) => void this.records.set(orderReference, { orderReference, state: "failed", reason }),
+        abandon: async () => undefined,
       },
     };
   }
@@ -75,11 +77,18 @@ export class JsonlIdempotencyStore implements IdempotencyStore {
       await lock.close();
       await unlink(lockPath).catch(() => undefined);
     };
+    const abandon = async () => {
+      if (released) return;
+      released = true;
+      await lock.close();
+      await unlink(lockPath).catch(() => undefined);
+    };
     return {
       state: "claimed",
       lease: {
         complete: (erpOrderId) => finish({ orderReference, state: "completed", erpOrderId }),
         fail: (reason) => finish({ orderReference, state: "failed", reason }),
+        abandon,
       },
     };
   }
@@ -110,8 +119,13 @@ export class JsonlIdempotencyStore implements IdempotencyStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
-        const owner = Number(await readFile(lockPath, "utf8"));
-        if (Number.isInteger(owner)) process.kill(owner, 0);
+        const contents = await readFile(lockPath, "utf8");
+        const owner = Number(contents);
+        if (!contents.trim() || !Number.isInteger(owner) || owner <= 0) {
+          await unlink(lockPath).catch(() => undefined);
+          return this.acquireLock(lockPath);
+        }
+        process.kill(owner, 0);
         return undefined;
       } catch (ownerError) {
         if ((ownerError as NodeJS.ErrnoException).code === "EPERM") return undefined;

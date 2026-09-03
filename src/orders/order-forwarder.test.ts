@@ -114,24 +114,27 @@ describe("OrderForwarder", () => {
     expect(logger.error).toHaveBeenCalledWith("order definitief mislukt", expect.objectContaining({ deadLetterStored: false }));
   });
 
-  it("zet een actieve retryladder bij shutdown in de dode brievenbus", async () => {
+  it("laat een actieve retryladder bij shutdown herstelbaar achter", async () => {
     const deadLetters: DeadLetterItem[] = [];
+    const abandon = vi.fn(async () => undefined);
     const forwarder = new OrderForwarder(
       { createOrder: vi.fn() },
       { add: async (item) => void deadLetters.push(item) },
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       () => new Promise(() => undefined),
+      {
+        claim: async () => ({
+          state: "claimed",
+          lease: { complete: vi.fn(), fail: vi.fn(), abandon },
+        }),
+      },
     );
 
     await expect(forwarder.enqueue(order)).resolves.toEqual({ duplicate: false });
     await forwarder.shutdown();
 
-    expect(deadLetters).toHaveLength(1);
-    expect(deadLetters[0]).toMatchObject({
-      orderReference: order.reference,
-      reason: "bridge stopped during order processing",
-      order,
-    });
+    expect(deadLetters).toHaveLength(0);
+    expect(abandon).toHaveBeenCalledOnce();
   });
 
   it("hervat tijdens de startveegronde achtergebleven processing-orders", async () => {

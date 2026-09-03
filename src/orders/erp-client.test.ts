@@ -11,4 +11,15 @@ describe("HttpErpClient", () => {
     await expect(new HttpErpClient("http://erp", "key", 5).createOrder({ lines: [{ sku: "A", quantity: 1 }] }, "173"))
       .rejects.toThrow("ERP request timed out after 5ms");
   });
+
+  it("keeps the deadline active while reading the response body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+      },
+    }), { status: 200 })));
+
+    await expect(new HttpErpClient("http://erp", "key", 5).createOrder({ lines: [{ sku: "A", quantity: 1 }] }, "173"))
+      .rejects.toThrow("ERP request timed out after 5ms");
+  });
 });
